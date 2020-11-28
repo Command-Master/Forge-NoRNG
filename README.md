@@ -17,7 +17,7 @@ so this is what I will use in the explaination).
 ```json
 "logging": {
     "client": {
-        "argument": "-javaagent:/home/commandmaster/Instrumentation/src/norng.jar",
+        "argument": "-javaagent:<full path of your norng.jar>",
         "file": {
             "id": "client-1.12.xml",
             "sha1": "ef4f57b922df243d0cef096efe808c72db042149",
