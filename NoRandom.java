@@ -4,13 +4,15 @@ import jdk.internal.org.objectweb.asm.Type;
 import jdk.internal.org.objectweb.asm.tree.ClassNode;
 import jdk.internal.org.objectweb.asm.tree.MethodNode;
 
-import java.io.FileWriter;
-import java.io.IOException;
-import java.io.PrintWriter;
+import java.io.*;
 import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.Instrumentation;
 import java.lang.instrument.UnmodifiableClassException;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.security.ProtectionDomain;
 import java.util.Random;
 import java.util.UUID;
 
@@ -19,7 +21,21 @@ import static jdk.internal.org.objectweb.asm.Opcodes.*;
 public class NoRandom {
     private static Class<?> mathHelper;
     private static Field RANDOM;
-    public static void premain(String argument, Instrumentation instrumentation) throws IOException, UnmodifiableClassException, InterruptedException {
+    private static byte[] BYTES;
+    public static PrintWriter debugger;
+    private static final String LOG_FILE = "";
+    public static final boolean DEBUG = false;
+    public static void premain(String argument, Instrumentation instrumentation) throws UnmodifiableClassException, ClassNotFoundException, NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException, FileNotFoundException {
+        if (DEBUG) {
+            debugger = new PrintWriter(new File(LOG_FILE));
+        }
+        Class<?> unsafe = Class.forName("sun.misc.Unsafe");
+        Method defineClass = unsafe.getMethod("defineClass", String.class, byte[].class, int.class, int.class, ClassLoader.class, ProtectionDomain.class);
+        Constructor<?> unsafeConstructor = unsafe.getDeclaredConstructor();
+        unsafeConstructor.setAccessible(true);
+        Object unsafeObj = unsafeConstructor.newInstance();
+        byte[] source = getBytes(Endpoint.class, instrumentation);
+        defineClass.invoke(unsafeObj, "Endpoint", source, 0, source.length, Random.class.getClassLoader(), (ProtectionDomain) null);
         Class<?> cls = Random.class;
         ClassFileTransformer transformer = (loader, className, classBeingRedefined, protectionDomain, classfileBuffer) -> {
             try {
@@ -66,6 +82,19 @@ public class NoRandom {
         }).start();
     }
 
+    private static byte[] getBytes(Class<?> klass, Instrumentation instrumentation) throws UnmodifiableClassException {
+        ClassFileTransformer transformer = (loader, className, classBeingRedefined, protectionDomain, classfileBuffer) -> {
+            if (klass.equals(classBeingRedefined)) {
+                BYTES = classfileBuffer;
+            }
+            return classfileBuffer;
+        };
+        instrumentation.addTransformer(transformer, true);
+        instrumentation.retransformClasses(klass);
+        instrumentation.removeTransformer(transformer);
+        return BYTES;
+    }
+
     private static byte[] transform(String name, byte[] data) throws IOException {
         ClassReader reader = new ClassReader(data);
         ClassNode node = new ClassNode();
@@ -80,10 +109,17 @@ public class NoRandom {
         for (MethodNode node : b.methods) {
             if (node.name.equals("<init>") && node.desc.equals("()V")) {
                 node.instructions.clear();
-                node.instructions.clear();
                 node.visitVarInsn(ALOAD, 0);
-                node.visitLdcInsn(0L);
-                node.visitMethodInsn(INVOKESPECIAL, Type.getInternalName(Random.class), "<init>", "(J)V", false);
+//                node.visitLdcInsn(0L);
+                node.visitMethodInsn(INVOKESPECIAL, Type.getInternalName(Object.class), "<init>", "()V", false);
+                node.visitVarInsn(ALOAD, 0);
+                try {
+                    node.visitMethodInsn(INVOKESTATIC, Type.getInternalName(Endpoint.class), "random",
+                            Type.getMethodDescriptor(Endpoint.class.getMethod("random", Random.class)),
+                            false);
+                } catch (NoSuchMethodException e) {
+                    e.printStackTrace();
+                }
                 node.visitInsn(RETURN);
             }
         }
